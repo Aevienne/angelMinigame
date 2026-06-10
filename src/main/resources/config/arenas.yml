@@ -1,0 +1,5 @@
+# AngelMinigame Arena Definitions
+# Edit this file and run /arena reload to apply changes without restarting
+# Console commands are DISABLED by default — enable in config.yml with care
+
+arenas: {}

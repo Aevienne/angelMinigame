@@ -1,0 +1,35 @@
+# AngelMinigame Configuration
+
+# Selection wand item
+wand-item: STICK
+
+# Snapshot performance
+snapshot:
+  batch-size: 200
+
+# TNT Run block disappear delay (in ticks)
+tnt-run:
+  disappear-ticks: 10
+
+# Commands allowed during games (in addition to /game leave)
+game-commands:
+  allowed:
+    - "/msg"
+    - "/r"
+    - "/reply"
+    - "/whisper"
+    - "/tell"
+    - "/w"
+
+# Console command action — DISABLED by default for security
+# Server owner must explicitly enable and whitelist command prefixes
+allowed-commands:
+  enabled: false
+  prefixes:
+    - "give"
+    - "effect"
+    - "xp"
+    - "playsound"
+    - "particle"
+    - "title"
+    - "setblock"

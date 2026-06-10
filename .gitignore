@@ -1,0 +1,25 @@
+.gradle/
+build/
+*.class
+*.jar
+*.log
+*.tmp
+*.lock
+out/
+bin/
+.gradlelet/
+
+# IDE
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

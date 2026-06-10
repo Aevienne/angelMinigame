@@ -1,0 +1,24 @@
+name: AngelMinigame
+version: '1.0.0'
+main: me.angelique.angelMinigame.AngelMinigame
+api-version: '1.21'
+description: Configurable minigame engine with arena creation, custom game scripting, and world isolation
+authors: [Angelique]
+softdepend: [AngelNCore]
+
+commands:
+  arena:
+    description: Create and manage minigame arenas
+    usage: /arena <create|delete|info|list|wand|setregion|setlobby|setspawn|...>
+    aliases: [are]
+  game:
+    description: Join, leave, or manage minigames
+    usage: /game <join|leave|start|stop|list>
+
+permissions:
+  angelminigame.admin:
+    description: Full access to arena management and game control
+    default: op
+  angelminigame.player:
+    description: Join and leave minigames
+    default: true
