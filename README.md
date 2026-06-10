@@ -1,6 +1,6 @@
 # angelMinigame
 
-Configurable minigame engine for Paper 1.21. Admins create arenas and game modes entirely in-game — no command blocks, no restarts.
+Configurable minigame engine for Paper 1.21.
 
 ## Modes
 
@@ -26,7 +26,7 @@ Configurable minigame engine for Paper 1.21. Admins create arenas and game modes
 
 ## Custom Games
 
-Edit `arenas.yml` and run `/arena reload`. Scripts use a timeline of triggers (`at`, `every`, `repeat`, `on: death`, `on: win`) and 36 built-in actions — no Java required.
+Edit `arenas.yml` and run `/arena reload`. Scripts use a timeline of triggers (`at`, `every`, `repeat`, `on: death`, `on: win`) and 36 built-in actions.
 
 ## Dependencies
 
