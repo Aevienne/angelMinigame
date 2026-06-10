@@ -8,9 +8,13 @@ import me.angelique.angelMinigame.game.script.ActionRegistry;
 import me.angelique.angelMinigame.game.script.GameScript;
 import me.angelique.angelMinigame.integration.AngelCoreBridge;
 import org.bukkit.Bukkit;
+import org.bukkit.Color;
+import org.bukkit.FireworkEffect;
 import org.bukkit.Location;
 import org.bukkit.Sound;
+import org.bukkit.entity.Firework;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.meta.FireworkMeta;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.scheduler.BukkitRunnable;
 
@@ -236,9 +240,10 @@ public class GameManager {
         }
 
         String winnerName = "Nobody";
+        Player winnerPlayer = null;
         if (winnerUuid != null) {
-            Player wp = Bukkit.getPlayer(winnerUuid);
-            if (wp != null) winnerName = wp.getName();
+            winnerPlayer = Bukkit.getPlayer(winnerUuid);
+            if (winnerPlayer != null) winnerName = winnerPlayer.getName();
         }
 
         session.broadcast(AngelMinigame.clr("&6" + winnerName + " &ewon &6" + session.getArena().getName() + "&e!"));
@@ -256,6 +261,59 @@ public class GameManager {
             }
         }
 
+        celebrateWin(session, winnerPlayer, winnerName);
+    }
+
+    private void celebrateWin(GameSession session, Player winnerPlayer, String winnerName) {
+        Location center;
+        if (winnerPlayer != null) {
+            center = winnerPlayer.getLocation().clone();
+        } else if (session.getArena().getLobbySpawn() != null) {
+            center = session.getArena().getLobbySpawn().clone();
+        } else {
+            center = session.getArena().getWorld().getSpawnLocation().clone();
+        }
+
+        for (UUID uuid : session.getPlayers()) {
+            Player p = Bukkit.getPlayer(uuid);
+            if (p != null) {
+                p.sendTitle(
+                    AngelMinigame.clr("&6&l" + winnerName),
+                    AngelMinigame.clr("&eWinner!"),
+                    5, 60, 10
+                );
+                p.playSound(p.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1f, 1f);
+            }
+        }
+
+        new org.bukkit.scheduler.BukkitRunnable() {
+            int ticks = 0;
+            final int celebrationTicks = 100;
+
+            @Override public void run() {
+                if (session.getState() != GameState.ENDING) { cancel(); return; }
+                if (ticks >= celebrationTicks) {
+                    startReset(session);
+                    cancel();
+                    return;
+                }
+                if (ticks % 20 == 0 && winnerPlayer != null) {
+                    Location loc = winnerPlayer.getLocation().clone().add(0, 2, 0);
+                    Firework fw = winnerPlayer.getWorld().spawn(loc, Firework.class);
+                    FireworkMeta meta = fw.getFireworkMeta();
+                    meta.addEffect(FireworkEffect.builder()
+                        .withColor(Color.RED, Color.ORANGE, Color.GREEN, Color.AQUA)
+                        .with(FireworkEffect.Type.BALL_LARGE)
+                        .withFlicker().build());
+                    meta.setPower(1);
+                    fw.setFireworkMeta(meta);
+                }
+                ticks++;
+            }
+        }.runTaskTimer(plugin, 0L, 5L);
+    }
+
+    private void startReset(GameSession session) {
         session.setState(GameState.RESETTING);
         if (session.getArena().isRestoreOnEnd()) {
             ArenaSnapshot.restore(session, () -> finishReset(session));

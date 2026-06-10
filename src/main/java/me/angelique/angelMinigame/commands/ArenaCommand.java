@@ -4,8 +4,12 @@ import me.angelique.angelMinigame.AngelMinigame;
 import me.angelique.angelMinigame.arena.Arena;
 import me.angelique.angelMinigame.arena.ArenaManager;
 import org.bukkit.Bukkit;
+import org.bukkit.GameRule;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.World;
+import org.bukkit.WorldCreator;
+import org.bukkit.WorldType;
 import org.bukkit.command.*;
 import org.bukkit.entity.Player;
 
@@ -29,6 +33,10 @@ public class ArenaCommand implements CommandExecutor, TabCompleter {
         String sub = args[0].toLowerCase();
         switch (sub) {
             case "create": return handleCreate(sender, args);
+            case "deletemap": return handleDeleteMap(sender, args);
+            case "createmap": return handleCreateMap(sender, args);
+            case "edit": return handleEdit(sender, args);
+            case "tp": return handleTp(sender, args);
             case "delete": return handleDelete(sender, args);
             case "info": return handleInfo(sender, args);
             case "list": return handleList(sender);
@@ -53,6 +61,30 @@ public class ArenaCommand implements CommandExecutor, TabCompleter {
                 return true;
         }
     }
+
+    // -- Context-aware arena resolution: if no name given, infer from current world --
+    private Arena resolveArena(CommandSender sender, String[] args, int nameIndex) {
+        if (args.length > nameIndex && !args[nameIndex].isEmpty()) {
+            Arena a = plugin.getArenaManager().get(args[nameIndex]);
+            if (a != null) return a;
+        }
+        if (sender instanceof Player p) {
+            String worldName = p.getWorld().getName();
+            if (worldName.startsWith("arena_")) {
+                String inferred = worldName.substring(6);
+                Arena a = plugin.getArenaManager().get(inferred);
+                if (a != null) return a;
+            }
+        }
+        return null;
+    }
+
+    // Returns true if the explicit name at args[idx] is a known arena (not a value)
+    private boolean nameProvided(String[] args, int idx) {
+        return args.length > idx && plugin.getArenaManager().get(args[idx]) != null;
+    }
+
+    // -- Handlers --
 
     private boolean handleCreate(CommandSender sender, String[] args) {
         if (!hasPerm(sender, "angelminigame.admin")) return true;
@@ -81,19 +113,48 @@ public class ArenaCommand implements CommandExecutor, TabCompleter {
 
     private boolean handleDelete(CommandSender sender, String[] args) {
         if (!hasPerm(sender, "angelminigame.admin")) return true;
-        if (args.length < 2) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena delete <name>")); return true; }
-        ArenaManager mgr = plugin.getArenaManager();
-        Arena arena = mgr.get(args[1]);
-        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found.")); return true; }
-        mgr.delete(args[1]);
-        sender.sendMessage(AngelMinigame.clr("&aArena '&6" + args[1] + "&a' deleted."));
+        Arena arena = resolveArena(sender, args, 1);
+        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found. Stand in an arena world or specify a name.")); return true; }
+        plugin.getArenaManager().delete(arena.getName());
+        sender.sendMessage(AngelMinigame.clr("&aArena '&6" + arena.getName() + "&a' deleted (world left intact)."));
         return true;
     }
 
+    private boolean handleDeleteMap(CommandSender sender, String[] args) {
+        if (!hasPerm(sender, "angelminigame.admin")) return true;
+        Arena arena = resolveArena(sender, args, 1);
+        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found. Stand in an arena world or specify a name.")); return true; }
+        String worldName = arena.getWorldName();
+        if (worldName == null || worldName.isEmpty()) {
+            sender.sendMessage(AngelMinigame.clr("&cNo world associated. Use /arena delete instead."));
+            return true;
+        }
+        if (!worldName.startsWith("arena_")) {
+            sender.sendMessage(AngelMinigame.clr("&cSafety: this arena's world (" + worldName + ") does not start with 'arena_'. Use /arena delete instead."));
+            return true;
+        }
+        World world = arena.getWorld();
+        if (world != null) {
+            java.io.File worldFolder = world.getWorldFolder();
+            Bukkit.unloadWorld(world, false);
+            deleteFolder(worldFolder);
+            sender.sendMessage(AngelMinigame.clr("&aWorld &6" + worldName + " &adeleted."));
+        }
+        plugin.getArenaManager().delete(arena.getName());
+        sender.sendMessage(AngelMinigame.clr("&aArena '&6" + arena.getName() + "&a' and its world deleted."));
+        return true;
+    }
+
+    private void deleteFolder(java.io.File folder) {
+        if (!folder.exists()) return;
+        java.io.File[] files = folder.listFiles();
+        if (files != null) for (java.io.File f : files) deleteFolder(f);
+        folder.delete();
+    }
+
     private boolean handleInfo(CommandSender sender, String[] args) {
-        if (args.length < 2) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena info <name>")); return true; }
-        Arena arena = plugin.getArenaManager().get(args[1]);
-        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found.")); return true; }
+        Arena arena = resolveArena(sender, args, 1);
+        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found. Stand in an arena world or specify a name.")); return true; }
         sender.sendMessage(AngelMinigame.clr("&6=== " + arena.getName() + " ==="));
         sender.sendMessage(AngelMinigame.clr("&eMode: &f" + arena.getMode()));
         sender.sendMessage(AngelMinigame.clr("&eWorld: &f" + arena.getWorldName()));
@@ -144,9 +205,8 @@ public class ArenaCommand implements CommandExecutor, TabCompleter {
     private boolean handleSetRegion(CommandSender sender, String[] args) {
         if (!hasPerm(sender, "angelminigame.admin")) return true;
         if (!(sender instanceof Player p)) { sender.sendMessage("Player only."); return true; }
-        if (args.length < 2) { p.sendMessage(AngelMinigame.clr("&cUsage: /arena setregion <name>")); return true; }
-        Arena arena = plugin.getArenaManager().get(args[1]);
-        if (arena == null) { p.sendMessage(AngelMinigame.clr("&cArena not found.")); return true; }
+        Arena arena = resolveArena(p, args, 1);
+        if (arena == null) { p.sendMessage(AngelMinigame.clr("&cArena not found. Stand in an arena world or specify a name.")); return true; }
         Location pos1 = plugin.getConfig().getLocation("selection." + p.getUniqueId() + ".pos1");
         Location pos2 = plugin.getConfig().getLocation("selection." + p.getUniqueId() + ".pos2");
         if (pos1 == null || pos2 == null) { p.sendMessage(AngelMinigame.clr("&cMake a selection first with /arena wand.")); return true; }
@@ -162,9 +222,8 @@ public class ArenaCommand implements CommandExecutor, TabCompleter {
     private boolean handleSetLocation(CommandSender sender, String[] args, String type) {
         if (!hasPerm(sender, "angelminigame.admin")) return true;
         if (!(sender instanceof Player p)) { sender.sendMessage("Player only."); return true; }
-        if (args.length < 2) { p.sendMessage(AngelMinigame.clr("&cUsage: /arena set" + type + " <name>")); return true; }
-        Arena arena = plugin.getArenaManager().get(args[1]);
-        if (arena == null) { p.sendMessage(AngelMinigame.clr("&cArena not found.")); return true; }
+        Arena arena = resolveArena(p, args, 1);
+        if (arena == null) { p.sendMessage(AngelMinigame.clr("&cArena not found. Stand in an arena world or specify a name.")); return true; }
         Location loc = p.getLocation();
         if (type.equals("lobby")) { arena.setLobbySpawn(loc); arena.setWorldName(loc.getWorld().getName()); }
         else if (type.equals("spectator")) arena.setSpectatorSpawn(loc);
@@ -176,9 +235,8 @@ public class ArenaCommand implements CommandExecutor, TabCompleter {
     private boolean handleAddSpawn(CommandSender sender, String[] args) {
         if (!hasPerm(sender, "angelminigame.admin")) return true;
         if (!(sender instanceof Player p)) { sender.sendMessage("Player only."); return true; }
-        if (args.length < 2) { p.sendMessage(AngelMinigame.clr("&cUsage: /arena addspawn <name>")); return true; }
-        Arena arena = plugin.getArenaManager().get(args[1]);
-        if (arena == null) { p.sendMessage(AngelMinigame.clr("&cArena not found.")); return true; }
+        Arena arena = resolveArena(p, args, 1);
+        if (arena == null) { p.sendMessage(AngelMinigame.clr("&cArena not found. Stand in an arena world or specify a name.")); return true; }
         arena.addPlayerSpawn(p.getLocation());
         plugin.getArenaManager().save();
         p.sendMessage(AngelMinigame.clr("&aPlayer spawn #" + arena.getPlayerSpawns().size() + " added to &6" + arena.getName() + "&a."));
@@ -187,9 +245,8 @@ public class ArenaCommand implements CommandExecutor, TabCompleter {
 
     private boolean handleClearSpawns(CommandSender sender, String[] args) {
         if (!hasPerm(sender, "angelminigame.admin")) return true;
-        if (args.length < 2) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena clearspawns <name>")); return true; }
-        Arena arena = plugin.getArenaManager().get(args[1]);
-        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found.")); return true; }
+        Arena arena = resolveArena(sender, args, 1);
+        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found. Stand in an arena world or specify a name.")); return true; }
         arena.clearPlayerSpawns();
         plugin.getArenaManager().save();
         sender.sendMessage(AngelMinigame.clr("&aPlayer spawns cleared for &6" + arena.getName() + "&a."));
@@ -198,11 +255,12 @@ public class ArenaCommand implements CommandExecutor, TabCompleter {
 
     private boolean handleMinMax(CommandSender sender, String[] args) {
         if (!hasPerm(sender, "angelminigame.admin")) return true;
-        if (args.length < 4) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena minmax <name> <min> <max>")); return true; }
-        Arena arena = plugin.getArenaManager().get(args[1]);
-        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found.")); return true; }
+        Arena arena = resolveArena(sender, args, 1);
+        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found. Stand in an arena world or specify a name.")); return true; }
+        int off = nameProvided(args, 1) ? 2 : 1;
+        if (args.length <= off + 1) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena minmax [name] <min> <max>")); return true; }
         try {
-            int min = Integer.parseInt(args[2]), max = Integer.parseInt(args[3]);
+            int min = Integer.parseInt(args[off]), max = Integer.parseInt(args[off + 1]);
             arena.setMinPlayers(min); arena.setMaxPlayers(max);
             plugin.getArenaManager().save();
             sender.sendMessage(AngelMinigame.clr("&aPlayers set to " + min + "-" + max + " for &6" + arena.getName() + "&a."));
@@ -212,50 +270,54 @@ public class ArenaCommand implements CommandExecutor, TabCompleter {
 
     private boolean handleCountdown(CommandSender sender, String[] args) {
         if (!hasPerm(sender, "angelminigame.admin")) return true;
-        if (args.length < 3) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena countdown <name> <seconds>")); return true; }
-        Arena arena = plugin.getArenaManager().get(args[1]);
-        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found.")); return true; }
-        try { arena.setCountdown(Integer.parseInt(args[2])); plugin.getArenaManager().save(); } catch (NumberFormatException e) { sender.sendMessage(AngelMinigame.clr("&cInvalid number.")); return true; }
-        sender.sendMessage(AngelMinigame.clr("&aCountdown set to &6" + args[2] + "s &afor &6" + arena.getName() + "&a."));
+        Arena arena = resolveArena(sender, args, 1);
+        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found. Stand in an arena world or specify a name.")); return true; }
+        int off = nameProvided(args, 1) ? 2 : 1;
+        if (args.length <= off) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena countdown [name] <seconds>")); return true; }
+        try { arena.setCountdown(Integer.parseInt(args[off])); plugin.getArenaManager().save(); } catch (NumberFormatException e) { sender.sendMessage(AngelMinigame.clr("&cInvalid number.")); return true; }
+        sender.sendMessage(AngelMinigame.clr("&aCountdown set to &6" + args[off] + "s &afor &6" + arena.getName() + "&a."));
         return true;
     }
 
     private boolean handleFloor(CommandSender sender, String[] args) {
         if (!hasPerm(sender, "angelminigame.admin")) return true;
-        if (args.length < 3) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena floor <name> <y>")); return true; }
-        Arena arena = plugin.getArenaManager().get(args[1]);
-        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found.")); return true; }
-        try { arena.setFloorLevel(Integer.parseInt(args[2])); plugin.getArenaManager().save(); } catch (NumberFormatException e) { sender.sendMessage(AngelMinigame.clr("&cInvalid number.")); return true; }
-        sender.sendMessage(AngelMinigame.clr("&aFloor level set to Y=" + args[2] + " for &6" + arena.getName() + "&a."));
+        Arena arena = resolveArena(sender, args, 1);
+        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found. Stand in an arena world or specify a name.")); return true; }
+        int off = nameProvided(args, 1) ? 2 : 1;
+        if (args.length <= off) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena floor [name] <y>")); return true; }
+        try { arena.setFloorLevel(Integer.parseInt(args[off])); plugin.getArenaManager().save(); } catch (NumberFormatException e) { sender.sendMessage(AngelMinigame.clr("&cInvalid number.")); return true; }
+        sender.sendMessage(AngelMinigame.clr("&aFloor level set to Y=" + args[off] + " for &6" + arena.getName() + "&a."));
         return true;
     }
 
     private boolean handleReward(CommandSender sender, String[] args) {
         if (!hasPerm(sender, "angelminigame.admin")) return true;
-        if (args.length < 3) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena reward <name> <amount>")); return true; }
-        Arena arena = plugin.getArenaManager().get(args[1]);
-        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found.")); return true; }
-        try { arena.setCurrencyReward(Double.parseDouble(args[2])); plugin.getArenaManager().save(); } catch (NumberFormatException e) { sender.sendMessage(AngelMinigame.clr("&cInvalid number.")); return true; }
-        sender.sendMessage(AngelMinigame.clr("&aCurrency reward set to &6" + args[2] + " &afor &6" + arena.getName() + "&a."));
+        Arena arena = resolveArena(sender, args, 1);
+        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found. Stand in an arena world or specify a name.")); return true; }
+        int off = nameProvided(args, 1) ? 2 : 1;
+        if (args.length <= off) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena reward [name] <amount>")); return true; }
+        try { arena.setCurrencyReward(Double.parseDouble(args[off])); plugin.getArenaManager().save(); } catch (NumberFormatException e) { sender.sendMessage(AngelMinigame.clr("&cInvalid number.")); return true; }
+        sender.sendMessage(AngelMinigame.clr("&aCurrency reward set to &6" + args[off] + " &afor &6" + arena.getName() + "&a."));
         return true;
     }
 
     private boolean handleBlocks(CommandSender sender, String[] args) {
         if (!hasPerm(sender, "angelminigame.admin")) return true;
-        if (args.length < 4) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena blocks <add|remove|list> <name> [material]")); return true; }
-        Arena arena = plugin.getArenaManager().get(args[2]);
-        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found.")); return true; }
+        Arena arena = resolveArena(sender, args, 2);
+        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found. Stand in an arena world or specify a name.")); return true; }
+        if (args.length < 2) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena blocks <add|remove|list> [name] [material]")); return true; }
         String action = args[1].toLowerCase();
         if (action.equals("list")) {
             sender.sendMessage(AngelMinigame.clr("&eBreakable blocks for &6" + arena.getName() + "&e: "
                 + (arena.getBreakableBlocks().isEmpty() ? "&7none" : arena.getBreakableBlocks().toString())));
             return true;
         }
-        if (args.length < 4) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena blocks <add|remove> <name> <material>")); return true; }
-        Material mat = Material.matchMaterial(args[3].toUpperCase());
-        if (mat == null) { sender.sendMessage(AngelMinigame.clr("&cUnknown material: " + args[3])); return true; }
-        if (action.equals("add")) { arena.getBreakableBlocks().add(mat); }
-        else { arena.getBreakableBlocks().remove(mat); }
+        int off = nameProvided(args, 2) ? 3 : 2;
+        if (args.length <= off) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena blocks add|remove [name] <material>")); return true; }
+        Material mat = Material.matchMaterial(args[off].toUpperCase());
+        if (mat == null) { sender.sendMessage(AngelMinigame.clr("&cUnknown material: " + args[off])); return true; }
+        if (action.equals("add")) arena.getBreakableBlocks().add(mat);
+        else arena.getBreakableBlocks().remove(mat);
         plugin.getArenaManager().save();
         sender.sendMessage(AngelMinigame.clr("&aBlocks updated for &6" + arena.getName() + "&a."));
         return true;
@@ -263,11 +325,12 @@ public class ArenaCommand implements CommandExecutor, TabCompleter {
 
     private boolean handleRules(CommandSender sender, String[] args) {
         if (!hasPerm(sender, "angelminigame.admin")) return true;
-        if (args.length < 4) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena rules <name> <key> <value>")); return true; }
-        Arena arena = plugin.getArenaManager().get(args[1]);
-        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found.")); return true; }
-        String key = args[2].toLowerCase();
-        String val = args[3];
+        Arena arena = resolveArena(sender, args, 1);
+        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found. Stand in an arena world or specify a name.")); return true; }
+        int off = nameProvided(args, 1) ? 2 : 1;
+        if (args.length <= off + 1) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena rules [name] <key> <value>")); return true; }
+        String key = args[off].toLowerCase();
+        String val = args[off + 1];
         switch (key) {
             case "pvp" -> arena.setAllowPvp(parseBool(val));
             case "block-break" -> arena.setAllowBlockBreak(parseBool(val));
@@ -285,19 +348,20 @@ public class ArenaCommand implements CommandExecutor, TabCompleter {
 
     private boolean handleAllowCmd(CommandSender sender, String[] args) {
         if (!hasPerm(sender, "angelminigame.admin")) return true;
-        if (args.length < 3) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena allowcmd <name> <add|remove|list> [command]")); return true; }
-        Arena arena = plugin.getArenaManager().get(args[1]);
-        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found.")); return true; }
-        String action = args[2].toLowerCase();
+        Arena arena = resolveArena(sender, args, 1);
+        if (arena == null) { sender.sendMessage(AngelMinigame.clr("&cArena not found. Stand in an arena world or specify a name.")); return true; }
+        int off = nameProvided(args, 1) ? 2 : 1;
+        if (args.length <= off) { sender.sendMessage(AngelMinigame.clr("&cUsage: /arena allowcmd [name] <add|remove|list> [command]")); return true; }
+        String action = args[off].toLowerCase();
         if (action.equals("list")) {
             sender.sendMessage(AngelMinigame.clr("&eAllowed commands for &6" + arena.getName() + "&e: "
                 + (arena.getAllowedCommands().isEmpty() ? "&7none" : arena.getAllowedCommands().toString())));
             return true;
         }
-        if (args.length < 4) { sender.sendMessage(AngelMinigame.clr("&cSpecify a command.")); return true; }
-        String cmd = args[3].toLowerCase();
-        if (action.equals("add")) { arena.getAllowedCommands().add(cmd); }
-        else { arena.getAllowedCommands().remove(cmd); }
+        if (args.length <= off + 1) { sender.sendMessage(AngelMinigame.clr("&cSpecify a command.")); return true; }
+        String cmd = args[off + 1].toLowerCase();
+        if (action.equals("add")) arena.getAllowedCommands().add(cmd);
+        else arena.getAllowedCommands().remove(cmd);
         plugin.getArenaManager().save();
         sender.sendMessage(AngelMinigame.clr("&aAllowed commands updated for &6" + arena.getName() + "&a."));
         return true;
@@ -306,6 +370,69 @@ public class ArenaCommand implements CommandExecutor, TabCompleter {
     private boolean handleScript(CommandSender sender, String[] args) {
         if (!hasPerm(sender, "angelminigame.admin")) return true;
         sender.sendMessage(AngelMinigame.clr("&7Script editing is done through arenas.yml directly. Use /arena reload to apply changes."));
+        return true;
+    }
+
+    private boolean handleCreateMap(CommandSender sender, String[] args) {
+        if (!hasPerm(sender, "angelminigame.admin")) return true;
+        if (!(sender instanceof Player p)) { sender.sendMessage("Player only."); return true; }
+        if (args.length < 2) { p.sendMessage(AngelMinigame.clr("&cUsage: /arena createmap <name>")); return true; }
+        Arena arena = plugin.getArenaManager().get(args[1]);
+        if (arena == null) { p.sendMessage(AngelMinigame.clr("&cArena not found. Create it first with /arena create.")); return true; }
+        String worldName = "arena_" + arena.getName().toLowerCase();
+        World existing = Bukkit.getWorld(worldName);
+        if (existing != null) {
+            p.sendMessage(AngelMinigame.clr("&eWorld " + worldName + " already exists. Loading it."));
+            arena.setWorldName(worldName);
+            p.teleport(existing.getSpawnLocation());
+            p.setGameMode(org.bukkit.GameMode.CREATIVE);
+            plugin.getArenaManager().save();
+            return true;
+        }
+        p.sendMessage(AngelMinigame.clr("&eCreating void world &6" + worldName + "&e..."));
+        WorldCreator wc = new WorldCreator(worldName);
+        wc.type(WorldType.FLAT);
+        wc.generateStructures(false);
+        wc.generatorSettings("{\"biome\":\"minecraft:plains\",\"layers\":[]}");
+        World world = wc.createWorld();
+        if (world == null) { p.sendMessage(AngelMinigame.clr("&cFailed to create world.")); return true; }
+        world.setGameRule(GameRule.DO_DAYLIGHT_CYCLE, false);
+        world.setGameRule(GameRule.DO_WEATHER_CYCLE, false);
+        world.setGameRule(GameRule.DO_MOB_SPAWNING, false);
+        world.setGameRule(GameRule.DO_FIRE_TICK, false);
+        world.setTime(6000);
+        arena.setWorldName(worldName);
+        plugin.getArenaManager().save();
+        world.getBlockAt(0, 64, 0).setType(Material.GLASS, false);
+        Location start = new Location(world, 0.5, 65, 0.5);
+        p.teleport(start);
+        p.setGameMode(org.bukkit.GameMode.CREATIVE);
+        p.sendMessage(AngelMinigame.clr("&aWorld &6" + worldName + " &acreated! Glass platform at 0,65,0. Build here, then set region/spawns."));
+        return true;
+    }
+
+    private boolean handleEdit(CommandSender sender, String[] args) {
+        if (!hasPerm(sender, "angelminigame.admin")) return true;
+        if (!(sender instanceof Player p)) { sender.sendMessage("Player only."); return true; }
+        Arena arena = resolveArena(p, args, 1);
+        if (arena == null) { p.sendMessage(AngelMinigame.clr("&cArena not found. Stand in an arena world or specify a name.")); return true; }
+        World world = arena.getWorld();
+        if (world == null) { p.sendMessage(AngelMinigame.clr("&cNo world set. Use /arena createmap or set the world manually.")); return true; }
+        p.teleport(world.getSpawnLocation());
+        p.setGameMode(org.bukkit.GameMode.CREATIVE);
+        p.sendMessage(AngelMinigame.clr("&aTeleported to &6" + arena.getName() + " &ain creative mode."));
+        return true;
+    }
+
+    private boolean handleTp(CommandSender sender, String[] args) {
+        if (!hasPerm(sender, "angelminigame.admin")) return true;
+        if (!(sender instanceof Player p)) { sender.sendMessage("Player only."); return true; }
+        Arena arena = resolveArena(p, args, 1);
+        if (arena == null) { p.sendMessage(AngelMinigame.clr("&cArena not found. Stand in an arena world or specify a name.")); return true; }
+        World world = arena.getWorld();
+        if (world == null) { p.sendMessage(AngelMinigame.clr("&cNo world set.")); return true; }
+        p.teleport(world.getSpawnLocation());
+        p.sendMessage(AngelMinigame.clr("&aTeleported to &6" + arena.getName() + "&a."));
         return true;
     }
 
@@ -324,27 +451,32 @@ public class ArenaCommand implements CommandExecutor, TabCompleter {
     private void sendHelp(CommandSender sender) {
         sender.sendMessage(AngelMinigame.clr("&6=== AngelMinigame Arena Commands ==="));
         sender.sendMessage(AngelMinigame.clr("&e/arena create <name> <mode> &7- Create an arena"));
-        sender.sendMessage(AngelMinigame.clr("&e/arena delete <name> &7- Delete an arena"));
-        sender.sendMessage(AngelMinigame.clr("&e/arena info <name> &7- Show arena info"));
+        sender.sendMessage(AngelMinigame.clr("&e/arena createmap <name> &7- Create isolated void world for arena"));
+        sender.sendMessage(AngelMinigame.clr("&e/arena deletemap <name> &7- Delete arena + world folder"));
+        sender.sendMessage(AngelMinigame.clr("&e/arena edit <name> &7- Teleport to arena world in creative"));
+        sender.sendMessage(AngelMinigame.clr("&e/arena tp <name> &7- Teleport to arena world"));
+        sender.sendMessage(AngelMinigame.clr("&e/arena delete <name> &7- Delete arena (world stays)"));
+        sender.sendMessage(AngelMinigame.clr("&7  In an arena world, you can omit [name] from most commands."));
+        sender.sendMessage(AngelMinigame.clr("&e/arena info [name] &7- Show arena info"));
         sender.sendMessage(AngelMinigame.clr("&e/arena list &7- List all arenas"));
         sender.sendMessage(AngelMinigame.clr("&e/arena reload &7- Reload arenas.yml"));
         sender.sendMessage(AngelMinigame.clr("&e/arena wand &7- Get selection wand"));
-        sender.sendMessage(AngelMinigame.clr("&e/arena setregion <name> &7- Set region from selection"));
-        sender.sendMessage(AngelMinigame.clr("&e/arena setlobby <name> &7- Set lobby spawn"));
-        sender.sendMessage(AngelMinigame.clr("&e/arena setspawn <name> &7- Add player spawn"));
-        sender.sendMessage(AngelMinigame.clr("&e/arena setspectator <name> &7- Set spectator spawn"));
-        sender.sendMessage(AngelMinigame.clr("&e/arena minmax <name> <min> <max> &7- Player limits"));
-        sender.sendMessage(AngelMinigame.clr("&e/arena countdown <name> <s> &7- Countdown duration"));
-        sender.sendMessage(AngelMinigame.clr("&e/arena floor <name> <y> &7- Floor/void level"));
-        sender.sendMessage(AngelMinigame.clr("&e/arena blocks <add|remove|list> <name> [mat] &7- Breakable blocks"));
-        sender.sendMessage(AngelMinigame.clr("&e/arena rules <name> <key> <value> &7- Set game rules"));
-        sender.sendMessage(AngelMinigame.clr("&e/arena allowcmd <name> <add|remove> <cmd> &7- Arena allowed commands"));
-        sender.sendMessage(AngelMinigame.clr("&e/arena reward <name> <amount> &7- Currency reward"));
+        sender.sendMessage(AngelMinigame.clr("&e/arena setregion [name] &7- Set region from selection"));
+        sender.sendMessage(AngelMinigame.clr("&e/arena setlobby [name] &7- Set lobby spawn"));
+        sender.sendMessage(AngelMinigame.clr("&e/arena setspawn [name] &7- Add player spawn"));
+        sender.sendMessage(AngelMinigame.clr("&e/arena setspectator [name] &7- Set spectator spawn"));
+        sender.sendMessage(AngelMinigame.clr("&e/arena minmax [name] <min> <max> &7- Player limits"));
+        sender.sendMessage(AngelMinigame.clr("&e/arena countdown [name] <s> &7- Countdown duration"));
+        sender.sendMessage(AngelMinigame.clr("&e/arena floor [name] <y> &7- Floor/void level"));
+        sender.sendMessage(AngelMinigame.clr("&e/arena blocks add|remove|list [name] [mat] &7- Breakable blocks"));
+        sender.sendMessage(AngelMinigame.clr("&e/arena rules [name] <key> <value> &7- Set game rules"));
+        sender.sendMessage(AngelMinigame.clr("&e/arena allowcmd [name] <add|remove> <cmd> &7- Arena allowed commands"));
+        sender.sendMessage(AngelMinigame.clr("&e/arena reward [name] <amount> &7- Currency reward"));
     }
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (args.length == 1) return List.of("create", "delete", "info", "list", "reload", "wand", "setregion", "setlobby", "setspawn", "addspawn", "clearspawns", "setspectator", "minmax", "countdown", "floor", "reward", "blocks", "rules", "allowcmd", "script");
+        if (args.length == 1) return List.of("create", "createmap", "deletemap", "edit", "tp", "delete", "info", "list", "reload", "wand", "setregion", "setlobby", "setspawn", "addspawn", "clearspawns", "setspectator", "minmax", "countdown", "floor", "reward", "blocks", "rules", "allowcmd", "script");
         if (args.length == 2) return plugin.getArenaManager().getArenaNames();
         if (args.length == 3) {
             String sub = args[0].toLowerCase();
