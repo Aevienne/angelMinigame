@@ -162,7 +162,7 @@ public class GameManager {
                 p.teleport(spawns.get(spawnIndex % spawns.size()));
                 spawnIndex++;
             }
-            p.setGameMode(org.bukkit.GameMode.ADVENTURE);
+            p.setGameMode(org.bukkit.GameMode.SURVIVAL);
             p.setHealth(20);
             p.setFoodLevel(20);
             p.setSaturation(5f);

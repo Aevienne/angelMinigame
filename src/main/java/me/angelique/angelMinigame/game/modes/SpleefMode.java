@@ -13,13 +13,6 @@ public class SpleefMode extends GameMode {
     public SpleefMode() { super("SPLEEF"); }
 
     @Override
-    public void onStart(GameSession session) {
-        for (Player p : session.getOnlineAlivePlayers()) {
-            p.setGameMode(org.bukkit.GameMode.ADVENTURE);
-        }
-    }
-
-    @Override
     public boolean onBlockBreak(Player player, Block block, GameSession session) {
         if (!session.isAlive(player.getUniqueId())) return true;
         if (session.getArena().getBreakableBlocks().contains(block.getType())) {
